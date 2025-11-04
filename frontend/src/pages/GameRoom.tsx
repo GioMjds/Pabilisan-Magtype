@@ -5,47 +5,33 @@ import { getSocket } from '../configs/websockets';
 import './GameRoom.css';
 
 const GameRoom = () => {
+	const [inputText, setInputText] = useState('');
+	const [copied, setCopied] = useState(false);
+
 	const { roomId } = useParams<{ roomId: string }>();
 	const navigate = useNavigate();
-	const { room: hookRoom, gameStarted, setReady, updateProgress } = useGame();
-	const [room, setRoom] = useState<any>(null);
-	const [inputText, setInputText] = useState('');
-	const [isReady, setIsReady] = useState(false);
-	const [copied, setCopied] = useState(false);
+
+	const { room, gameStarted, setReady, updateProgress, leaveRoom } = useGame();
+
 	const inputRef = useRef<HTMLInputElement>(null);
+
 	const socket = getSocket();
 	const currentPlayerId = socket.id;
 
 	const username = localStorage.getItem('username') || 'Guest';
+
+	const getCurrentPlayer = () => {
+		return room?.players.find((p: any) => p.id === currentPlayerId);
+	};
+
+	const currentPlayer = getCurrentPlayer();
+	const isReady = currentPlayer?.isReady ?? false;
 
 	useEffect(() => {
 		if (!username || username === 'Guest') {
 			navigate('/');
 		}
 	}, [username, navigate]);
-
-	// On mount, try to restore room from sessionStorage
-	useEffect(() => {
-		const savedRoom = sessionStorage.getItem('currentRoom');
-		if (savedRoom) {
-			try {
-				const parsedRoom = JSON.parse(savedRoom);
-				console.log('✅ Restored room from sessionStorage:', parsedRoom);
-				setRoom(parsedRoom);
-			} catch (e) {
-				console.error('Failed to parse saved room:', e);
-			}
-		}
-	}, []);
-
-	// Update room when hook room changes
-	useEffect(() => {
-		if (hookRoom) {
-			console.log('✅ Room loaded from hook:', hookRoom);
-			setRoom(hookRoom);
-			sessionStorage.setItem('currentRoom', JSON.stringify(hookRoom));
-		}
-	}, [hookRoom]);
 
 	useEffect(() => {
 		if (gameStarted && inputRef.current) {
@@ -55,7 +41,6 @@ const GameRoom = () => {
 
 	const handleReadyToggle = () => {
 		const newReadyState = !isReady;
-		setIsReady(newReadyState);
 		setReady(newReadyState);
 	};
 
@@ -83,8 +68,11 @@ const GameRoom = () => {
 		}
 	};
 
-	const getCurrentPlayer = () => {
-		return room?.players.find((p: any) => p.id === currentPlayerId);
+	const handleLeaveRoom = () => {
+		// Call the hook's leaveRoom which will emit to server and clear state
+		leaveRoom();
+		// Navigate back to lobby
+		navigate('/lobby');
 	};
 
 	const getCharacterClass = (index: number) => {
@@ -106,8 +94,6 @@ const GameRoom = () => {
 		);
 	}
 
-	const currentPlayer = getCurrentPlayer();
-
 	return (
 		<div className="game-room">
 			<div className="game-card">
@@ -119,7 +105,7 @@ const GameRoom = () => {
 							{copied ? '✓ Copied!' : '📋 Copy Code'}
 						</button>
 					</div>
-					<button onClick={() => navigate('/lobby')} className="leave-button">
+					<button onClick={handleLeaveRoom} className="leave-button">
 						Leave Room
 					</button>
 				</div>

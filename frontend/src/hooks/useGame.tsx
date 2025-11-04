@@ -6,46 +6,61 @@ import type { GameRoom } from '../types/Game.types';
 export const useGame = () => {
 	const [socket, setSocket] = useState<Socket | null>(null);
 	const [room, setRoom] = useState<GameRoom | null>(null);
-	const [gameStarted, setGameStarted] = useState(false);
+	const [gameStarted, setGameStarted] = useState<boolean>(false);
 	const [error, setError] = useState<string | null>(null);
-	const hasInitialized = useRef(false);
+
+	const hasInitialized = useRef<boolean>(false);
 
 	useEffect(() => {
-		// Only initialize once globally
-		if (hasInitialized.current) {
-			return;
-		}
+		if (hasInitialized.current) return;
 		hasInitialized.current = true;
 
 		const socketInstance = getSocket();
 		setSocket(socketInstance);
 
 		if (!socketInstance.connected) {
-			console.log('Connecting socket...');
 			socketInstance.connect();
+		}
+
+		const savedRoom = sessionStorage.getItem('currentRoom');
+		if (savedRoom) {
+			try {
+				const parsedRoom = JSON.parse(savedRoom);
+				console.log('🔄 Restoring room from sessionStorage:', parsedRoom);
+				setRoom(parsedRoom);
+			} catch (e) {
+				console.error('Failed to parse saved room:', e);
+			}
 		}
 
 		// Handle successful room creation
 		socketInstance.on('roomCreated', (data) => {
-			console.log('✅ Room created event received:', data);
 			setRoom(data.room);
 			setError(null);
+			sessionStorage.setItem('currentRoom', JSON.stringify(data.room));
 		});
 
 		socketInstance.on('playerJoined', (data) => {
-			console.log('✅ Player joined event received:', data);
 			setRoom(data.room);
 			setError(null);
+			sessionStorage.setItem('currentRoom', JSON.stringify(data.room));
 		});
 
 		socketInstance.on('playerLeft', (data) => {
+			console.log('👋 Player left event received:', data);
 			setRoom(data.room);
+			sessionStorage.setItem('currentRoom', JSON.stringify(data.room));
 		});
 
 		socketInstance.on('playerStatusChanged', (data) => {
 			setRoom((prev) => {
 				if (!prev) return prev;
-				return {
+				if (data.room) {
+					console.log('✅ Updating room with full data:', data.room);
+					sessionStorage.setItem('currentRoom', JSON.stringify(data.room));
+					return data.room;
+				}
+				const updatedRoom = {
 					...prev,
 					players: prev.players.map((p) =>
 						p.id === data.playerId
@@ -53,6 +68,8 @@ export const useGame = () => {
 							: p
 					),
 				};
+				sessionStorage.setItem('currentRoom', JSON.stringify(updatedRoom));
+				return updatedRoom;
 			});
 		});
 
@@ -60,14 +77,16 @@ export const useGame = () => {
 			setGameStarted(true);
 			setRoom((prev) => {
 				if (!prev) return prev;
-				return { ...prev, text: data.text, isActive: true };
+				const updatedRoom = { ...prev, text: data.text, isActive: true };
+				sessionStorage.setItem('currentRoom', JSON.stringify(updatedRoom));
+				return updatedRoom;
 			});
 		});
 
 		socketInstance.on('progressUpdated', (data) => {
 			setRoom((prev) => {
 				if (!prev) return prev;
-				return {
+				const updatedRoom = {
 					...prev,
 					players: prev.players.map((p) =>
 						p.id === data.playerId
@@ -75,6 +94,8 @@ export const useGame = () => {
 							: p
 					),
 				};
+				sessionStorage.setItem('currentRoom', JSON.stringify(updatedRoom));
+				return updatedRoom;
 			});
 		});
 
@@ -87,7 +108,6 @@ export const useGame = () => {
 			setGameStarted(false);
 		});
 
-		// Don't disconnect - keep socket alive for navigation
 		return () => {
 			// Removed disconnect to keep socket persistent
 		};
@@ -100,13 +120,10 @@ export const useGame = () => {
 			return;
 		}
 
-		console.log('Emitting createRoom with username:', username);
 		socket.emit('createRoom', { username }, (response: any) => {
-			console.log('Received createRoom response:', response);
 			if (response.error) {
 				setError(response.error);
 			} else {
-				console.log('Setting room:', response.room);
 				setRoom(response.room);
 				setError(null);
 			}
@@ -115,32 +132,35 @@ export const useGame = () => {
 
 	const joinRoom = (roomId: string, username: string) => {
 		if (!socket) {
-			console.error('Socket not connected');
 			setError('Socket not connected');
 			return;
 		}
 
-		console.log('Emitting joinRoom:', { roomId, username });
 		socket.emit('joinRoom', { roomId, username }, (response: any) => {
-			console.log('Received joinRoom response:', response);
 			if (response.error) {
-				console.error('Join error:', response.error);
 				setError(response.error);
 			} else {
-				console.log('Setting room from join response:', response.room);
 				setRoom(response.room);
 				setError(null);
-				sessionStorage.setItem('currentRoom', JSON.stringify(response.room));
 			}
 		});
 	};
 
 	const setReady = (isReady: boolean) => {
-		socket?.emit('playerReady', { isReady });
+		if (!socket) return;
+		socket.emit('playerReady', { isReady });
+	};
+
+	const leaveRoom = () => {
+		if (!socket) return;
+		socket.emit('leaveRoom');
+		setRoom(null);
+		sessionStorage.removeItem('currentRoom');
 	};
 
 	const updateProgress = (progress: number, currentText: string) => {
-		socket?.emit('updateProgress', { progress, currentText });
+		if (!socket) return;
+		socket.emit('updateProgress', { progress, currentText });
 	};
 
 	return {
@@ -149,6 +169,7 @@ export const useGame = () => {
 		createRoom,
 		joinRoom,
 		setReady,
+		leaveRoom,
 		updateProgress,
 		error,
 	};

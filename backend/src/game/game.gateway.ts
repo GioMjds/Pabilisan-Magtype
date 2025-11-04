@@ -41,9 +41,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { username: string },
   ) {
-    console.log(`Creating room for player: ${data.username}`);
     const roomId = this.generateRoomId();
-    console.log(`Generated room ID: ${roomId}`);
     
     const player: Player = {
       id: client.id,
@@ -67,7 +65,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.join(roomId);
 
     const serializedRoom = this.serializeRoom(room);
-    console.log(`Room created and serialized:`, serializedRoom);
 
     // Emit room created event to all clients in the room
     this.server.to(roomId).emit('roomCreated', {
@@ -116,7 +113,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.join(data.roomId);
 
     const serializedRoom = this.serializeRoom(room);
-    console.log(`Player ${data.username} joined room ${data.roomId}. Total players: ${room.players.size}`);
 
     // Emit to all players in the room (including the new player)
     this.server.to(data.roomId).emit('playerJoined', {
@@ -148,12 +144,21 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(roomId).emit('playerStatusChanged', {
       playerId: client.id,
       isReady: data.isReady,
+      room: this.serializeRoom(room),
     });
 
-    // Check if all players are ready
     const allReady = Array.from(room.players.values()).every(p => p.isReady);
     if (allReady && room.players.size > 1) {
       this.startGame(roomId);
+    }
+  }
+
+  @SubscribeMessage('leaveRoom')
+  handleLeaveRoom(@ConnectedSocket() client: Socket) {
+    const roomId = this.playerRooms.get(client.id);
+    if (roomId) {
+      console.log(`Player ${client.id} leaving room ${roomId}`);
+      this.handlePlayerLeave(client, roomId);
     }
   }
 
@@ -270,12 +275,19 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const room = this.rooms.get(roomId);
     if (!room) return;
 
+    console.log(`Player ${client.id} leaving room ${roomId}`);
+    
     room.players.delete(client.id);
     this.playerRooms.delete(client.id);
+    
+    // Make client leave the socket.io room
+    client.leave(roomId);
 
     if (room.players.size === 0) {
+      console.log(`Room ${roomId} is empty, deleting...`);
       this.rooms.delete(roomId);
     } else {
+      console.log(`Emitting playerLeft to remaining ${room.players.size} players`);
       this.server.to(roomId).emit('playerLeft', {
         playerId: client.id,
         room: this.serializeRoom(room),
